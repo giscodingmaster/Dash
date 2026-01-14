@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>لوحة متابعة العمليات - Dashboard</title>
+    
+    <!-- PWA Settings -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0d6efd">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2936/2936719.png">
+
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
     <style>
@@ -17,9 +23,15 @@
         .table-responsive { max-height: 650px; overflow-y: auto; }
         thead th { position: sticky; top: 0; z-index: 1020; background-color: #212529; color: white; }
         .badge { font-size: 0.8rem; padding: 0.5em 0.7em; }
+        
+        /* Install Button Style */
+        #installBtn { display: none; position: fixed; bottom: 20px; left: 20px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
     </style>
 </head>
 <body>
+
+<!-- Install Button -->
+<button id="installBtn" class="btn btn-dark btn-lg">📲 تثبيت التطبيق</button>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4 px-3">
@@ -135,29 +147,60 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
+    // 1. Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker Registered'))
+                .catch(err => console.log('Service Worker Failed', err));
+        });
+    }
+
+    // 2. Install Button Logic
+    let deferredPrompt;
+    const installBtn = document.getElementById('installBtn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        installBtn.style.display = 'block';
+    });
+
+    installBtn.addEventListener('click', (e) => {
+        installBtn.style.display = 'none';
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+                console.log('User accepted the A2HS prompt');
+            }
+            deferredPrompt = null;
+        });
+    });
+
+    // ------------------------------------------
+    // Existing Dashboard Logic
+    // ------------------------------------------
+
     const sheetURL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQAtkh9IahXDn646StIUXI46U8d1qiTajH5DAXUNY11ZL0UZa_xjHEgg5QcutZc6QFfL9C33MFtFSwH/pub?output=csv";
     
     let allData = []; 
     let chart1Instance = null;
     let chart2Instance = null;
-    let foundHeaders = []; // لحفظ أسماء الأعمدة التي وجدناها فعلياً
+    let foundHeaders = []; 
 
     function init() {
         Papa.parse(sheetURL, {
             download: true,
             header: true,
             skipEmptyLines: true,
-            // هذا السطر مهم جداً: يزيل المسافات الزائدة من عناوين الأعمدة
             transformHeader: function(h) {
                 return h.trim();
             },
             complete: function(results) {
                 if (results.data && results.data.length > 0) {
                     allData = results.data;
-                    foundHeaders = results.meta.fields; // حفظ أسماء الأعمدة
+                    foundHeaders = results.meta.fields; 
                     
-                    console.log("الأعمدة الموجودة في الملف:", foundHeaders); // للمطور للمراجعة
-
                     document.getElementById('last-update').innerText = "تحديث: " + new Date().toLocaleTimeString('ar-EG');
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('dashboard').style.display = 'block';
@@ -169,17 +212,16 @@
             },
             error: function(err) {
                 console.error(err);
-                alert("خطأ في التحميل.");
+                alert("خطأ في التحميل - تأكد من الاتصال بالإنترنت.");
             }
         });
     }
 
-    // دالة مساعدة للبحث عن القيمة بأكثر من اسم محتمل
     function getVal(row, keys) {
         for (let key of keys) {
             if (row[key] !== undefined) return row[key];
         }
-        return '-'; // إذا لم يجد شيئاً
+        return '-'; 
     }
 
     function applyDateFilter() {
@@ -187,14 +229,10 @@
         if (!selectedDate) { alert("يرجى اختيار تاريخ."); return; }
 
         const filteredData = allData.filter(row => {
-            // نحاول قراءة التاريخ من عدة مسميات محتملة
             const dateStr = getVal(row, ['التاريخ', 'تاريخ', 'Date']);
             if (dateStr === '-') return false;
-
             const rowDateObj = new Date(dateStr);
             const selectedDateObj = new Date(selectedDate);
-            
-            // التأكد من أن التاريخ صالح
             if(isNaN(rowDateObj)) return false;
 
             return (
@@ -218,14 +256,9 @@
 
     function updateDashboard(data, title) {
         document.getElementById('tableTitle').innerText = title;
-
-        // تصفية البيانات التي لا تحتوي على اسم (فارغة)
         const cleanData = data.filter(r => getVal(r, ['الاسم', 'اسم الموظف']) !== '-');
-
-        // الإحصائيات
         const totalRows = cleanData.length;
         
-        // حساب نوع العمل
         let siteCount = 0;
         let officeCount = 0;
         cleanData.forEach(r => {
@@ -241,7 +274,6 @@
         document.getElementById('office-work').innerText = officeCount;
         document.getElementById('unique-names').innerText = uniqueNames;
 
-        // تحديث الجدول
         const tableBody = document.getElementById('tableBody');
         tableBody.innerHTML = "";
         
@@ -250,15 +282,12 @@
         displayData.forEach(row => {
             const tr = document.createElement('tr');
             
-            // جلب البيانات باستخدام الدالة المرنة
             const dateVal = getVal(row, ['التاريخ', 'Date']);
             const company = getVal(row, ['الشركة', 'اسم الشركة', 'العميل']);
             const name = getVal(row, ['الاسم', 'اسم الموظف']);
             const typeWork = getVal(row, ['نوع العمل', 'طبيعة العمل']);
             const status = getVal(row, ['حالة اليوم', 'الحالة']);
             const details = getVal(row, ['تفاصيل النشاط', 'التفاصيل', 'ملاحظات']);
-            
-            // هنا المشكلة غالباً: نبحث عن عدة احتمالات للاسم
             const device = getVal(row, ['نوع الجهاز', 'الجهاز', 'device']); 
             const transport = getVal(row, ['وسيلة المواصلات', 'المواصلات', 'transport']);
 
@@ -299,7 +328,6 @@
             options: { maintainAspectRatio: false }
         });
 
-        // تجميع البيانات حسب الشركة
         const companyCounts = {};
         data.forEach(row => {
             const ent = getVal(row, ['الشركة', 'اسم الشركة', 'المنطقة']);
@@ -324,10 +352,9 @@
         });
     }
 
-    // دالة لمساعدة المستخدم في معرفة أسماء الأعمدة الصحيحة
     function debugColumns() {
         if(foundHeaders.length > 0) {
-            alert("أسماء الأعمدة التي تم العثور عليها في الملف هي:\n\n" + foundHeaders.join("\n"));
+            alert("أسماء الأعمدة المكتشفة:\n\n" + foundHeaders.join("\n"));
         } else {
             alert("لم يتم تحميل البيانات بعد.");
         }
